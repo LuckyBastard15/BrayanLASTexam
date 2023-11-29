@@ -9,6 +9,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Net/UnrealNetwork.h"
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -65,6 +66,57 @@ void ABrayanLastExamCharacter::BeginPlay()
 		}
 	}
 }
+
+void ABrayanLastExamCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ABrayanLastExamCharacter, bisHunter);
+	DOREPLIFETIME(ABrayanLastExamCharacter, bisPrey);
+}
+
+void ABrayanLastExamCharacter::Server_Shoot_Implementation()
+{
+	Shoot();
+}
+
+void ABrayanLastExamCharacter::StartShoot()
+{
+	Server_Shoot();
+}
+
+void ABrayanLastExamCharacter::Shoot()
+{
+	if (bisHunter)
+	{
+		FVector SpawnLocation = GetActorLocation() + GetActorForwardVector() * 100.0f + FVector(0.0f, 0.0f, 50.0f); // 200 unidades frente al jugador
+		FRotator SpawnRotation = GetActorRotation();
+
+		AActor* SpawnedSphere = GetWorld()->SpawnActor<AActor>(HunterBullet, SpawnLocation, SpawnRotation);
+
+		if (SpawnedSphere)
+		{
+			FVector LaunchDirection = GetActorForwardVector();
+			UStaticMeshComponent* MeshComponent = SpawnedSphere->FindComponentByClass<UStaticMeshComponent>();
+			if (MeshComponent)
+			{
+				MeshComponent->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
+				MeshComponent->SetAllPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+				MeshComponent->AddImpulse(LaunchDirection * LaunchForce * MeshComponent->GetMass());
+			}
+		}
+	}
+}
+
+void ABrayanLastExamCharacter::OnRep_Hunter()
+{
+	
+}
+
+void ABrayanLastExamCharacter::OnRep_Prey()
+{
+	
+}
+
 
 //////////////////////////////////////////////////////////////////////////
 // Input

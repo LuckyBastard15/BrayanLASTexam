@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HunterBullet.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "BrayanLastExamCharacter.generated.h"
@@ -39,7 +40,18 @@ class ABrayanLastExamCharacter : public ACharacter
 
 public:
 	ABrayanLastExamCharacter();
-	
+
+	UPROPERTY(EditAnywhere, Category="Bullet")
+	TSubclassOf<AHunterBullet> HunterBullet;
+
+	UPROPERTY(EditAnywhere, Category="Bullet")
+	int32 LaunchForce;
+
+	UPROPERTY(ReplicatedUsing=OnRep_Hunter)
+	bool bisHunter;
+
+	UPROPERTY(ReplicatedUsing=OnRep_Prey)
+	bool bisPrey;
 
 protected:
 
@@ -56,6 +68,26 @@ protected:
 	
 	// To add mapping context
 	virtual void BeginPlay();
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+public:
+
+	UFUNCTION(Server, Reliable)
+	void Server_Shoot();
+
+	UFUNCTION(BlueprintCallable)
+	void StartShoot();
+
+	UFUNCTION()
+	void Shoot();
+
+	UFUNCTION()
+	void OnRep_Hunter();
+
+	UFUNCTION()
+	void OnRep_Prey();
+	
 
 public:
 	/** Returns CameraBoom subobject **/
