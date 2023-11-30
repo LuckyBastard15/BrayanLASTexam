@@ -6,6 +6,7 @@
 
 class UStaticMeshComponent;
 class USphereComponent;
+class UProjectileMovementComponent;
 UCLASS()
 class BRAYANLASTEXAM_API AHunterBullet : public AActor
 {
@@ -21,10 +22,15 @@ public:
 	UPROPERTY(EditAnywhere, Category="Components")
 	USphereComponent* SphereComponent;
 
+	UPROPERTY(EditAnywhere, Category="Components")
+	UProjectileMovementComponent* ProjectileMovementComponent;
+
 	UPROPERTY(EditAnywhere, Category="Config")
 	int32 LifeTime;
 
 	FTimerHandle TimerHandle;
+
+	ABrayanLastExamCharacter* OwningPlayer;
 
 protected:
 	// Called when the game starts or when spawned
@@ -35,6 +41,9 @@ protected:
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+	UFUNCTION()
+	void GetPlayer(ABrayanLastExamCharacter* Player);
 
 private:
 	void LifeTimeOver();

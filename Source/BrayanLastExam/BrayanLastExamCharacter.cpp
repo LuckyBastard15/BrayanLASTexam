@@ -10,12 +10,17 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Net/UnrealNetwork.h"
+#include "OnlineSubsystem.h"
+#include "OnlineSessionSettings.h"
 
 
 //////////////////////////////////////////////////////////////////////////
 // ABrayanLastExamCharacter
 
-ABrayanLastExamCharacter::ABrayanLastExamCharacter()
+ABrayanLastExamCharacter::ABrayanLastExamCharacter() :
+	CreateSessionCompleteDelegate(FOnCreateSessionCompleteDelegate::CreateUObject(this, &ThisClass::OnCreateSessionComplete)),
+	FindSessionsCompleteDelegate(FOnFindSessionsCompleteDelegate::CreateUObject(this, &ThisClass::OnFindSessionComplete)),
+	JoinSessionCompleteDelegate(FOnJoinSessionCompleteDelegate::CreateUObject(this, &ThisClass::OnJoinSessionComplete))
 {
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
@@ -50,6 +55,18 @@ ABrayanLastExamCharacter::ABrayanLastExamCharacter()
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
+	
+	if (OnlineSubsystem)
+	{
+		OnlineSessionInterface = OnlineSubsystem->GetSessionInterface();
+		
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Purple,
+				FString::Printf(TEXT("Found Subsystem %s"), *OnlineSubsystem->GetSubsystemName().ToString()));
+		}
+	}
 }
 
 void ABrayanLastExamCharacter::BeginPlay()
@@ -88,20 +105,20 @@ void ABrayanLastExamCharacter::Shoot()
 {
 	if (bisHunter)
 	{
-		FVector SpawnLocation = GetActorLocation() + GetActorForwardVector() * 100.0f + FVector(0.0f, 0.0f, 50.0f); // 200 unidades frente al jugador
-		FRotator SpawnRotation = GetActorRotation();
-
-		AActor* SpawnedSphere = GetWorld()->SpawnActor<AActor>(HunterBullet, SpawnLocation, SpawnRotation);
-
-		if (SpawnedSphere)
+		if (bCanShoot)
 		{
-			FVector LaunchDirection = GetActorForwardVector();
-			UStaticMeshComponent* MeshComponent = SpawnedSphere->FindComponentByClass<UStaticMeshComponent>();
-			if (MeshComponent)
+			FVector SpawnLocation = GetActorLocation() + ( GetActorRotation().Vector()  * 100.0f ) + (GetActorUpVector() * 50.0f);
+			FRotator SpawnRotation = GetActorRotation();
+
+			FActorSpawnParameters spawnParameters;
+			spawnParameters.Instigator = GetInstigator();
+			spawnParameters.Owner = this;
+
+			AHunterBullet* Projectile = GetWorld()->SpawnActor<AHunterBullet>(HunterBullet,SpawnLocation, SpawnRotation, spawnParameters);
+			if (Projectile)
 			{
-				MeshComponent->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
-				MeshComponent->SetAllPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-				MeshComponent->AddImpulse(LaunchDirection * LaunchForce * MeshComponent->GetMass());
+				Projectile->GetPlayer(this);
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange,TEXT("Fire"));
 			}
 		}
 	}
@@ -115,6 +132,165 @@ void ABrayanLastExamCharacter::OnRep_Hunter()
 void ABrayanLastExamCharacter::OnRep_Prey()
 {
 	
+}
+
+void ABrayanLastExamCharacter::IsHunter()
+{
+	bisHunter = true;
+	bisPrey = false;
+
+	HunterUI();
+	
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f,FColor::Red, GetName());
+}
+
+void ABrayanLastExamCharacter::IsPrey()
+{
+	bisHunter = false;
+	bisPrey = true;
+
+	PreyUI();
+}
+
+void ABrayanLastExamCharacter::CanDie()
+{
+	if (bisPrey == true)
+	{
+		Die();
+	}
+}
+
+void ABrayanLastExamCharacter::CreateGameSession()
+{
+	//Create a session by pressing key 1
+	if (!OnlineSessionInterface.IsValid())
+	{
+		return;
+	}
+
+	auto ExistingSession = OnlineSessionInterface->GetNamedSession(NAME_GameSession);
+
+	if (ExistingSession != nullptr)
+	{
+		OnlineSessionInterface->DestroySession(NAME_GameSession);
+	}
+
+	OnlineSessionInterface->AddOnCreateSessionCompleteDelegate_Handle(CreateSessionCompleteDelegate);
+
+	TSharedPtr<FOnlineSessionSettings> SessionSettings = MakeShareable(new FOnlineSessionSettings);
+
+	SessionSettings->bIsLANMatch = false;
+	SessionSettings->NumPublicConnections = 4;
+	SessionSettings->bAllowJoinInProgress = true;
+	SessionSettings->bAllowJoinViaPresence = true;
+	SessionSettings->bShouldAdvertise = true;
+	SessionSettings->bUsesPresence = true;
+	SessionSettings->bUseLobbiesIfAvailable = true;
+	SessionSettings->Set(FName("MatchType"), FString("Free"), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+	const ULocalPlayer* LocalPlayer = GetWorld()->GetFirstLocalPlayerFromController();
+
+	OnlineSessionInterface->CreateSession(*LocalPlayer->GetPreferredUniqueNetId(), NAME_GameSession, *SessionSettings);
+}
+
+void ABrayanLastExamCharacter::JoinSession()
+{
+	if (!OnlineSessionInterface.IsValid())
+	{
+		return;
+	}
+
+	OnlineSessionInterface->AddOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegate);
+	
+	SessionSearch = MakeShareable(new FOnlineSessionSearch());
+	
+	SessionSearch->MaxSearchResults = 10000;
+	SessionSearch->bIsLanQuery = false;
+	SessionSearch->QuerySettings.Set(SEARCH_PRESENCE, true, EOnlineComparisonOp::Equals);
+	
+	const ULocalPlayer* LocalPlayer = GetWorld()->GetFirstLocalPlayerFromController();
+
+	OnlineSessionInterface->FindSessions(*LocalPlayer->GetPreferredUniqueNetId(), SessionSearch.ToSharedRef());
+}
+
+void ABrayanLastExamCharacter::OnCreateSessionComplete(FName SessionName, bool bWasSuccess)
+{
+	if (bWasSuccess)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Purple,
+				FString::Printf(TEXT("Create Session %s"), *SessionName.ToString()));
+		}
+		
+		UWorld* World = GetWorld();
+		if (World)
+		{
+			World->ServerTravel(FString("/Game/Levels/GameLevel?listen"));
+		}
+	}
+	else
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Purple,
+		FString::Printf(TEXT("Create Session Failed")));
+	}
+}
+
+void ABrayanLastExamCharacter::OnFindSessionComplete(bool bWasSuccessful)
+{
+	if (!OnlineSessionInterface.IsValid())
+		return;
+	
+	for (auto Result : SessionSearch->SearchResults)
+	{
+		FString Id = Result.GetSessionIdStr();
+		FString User = Result.Session.OwningUserName;
+		FString MatchType;
+		Result.Session.SessionSettings.Get(FName("MatchType"),MatchType);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Purple,
+				FString::Printf(TEXT("ID: %s, User: %s"), *Id, *User));
+		}
+
+		if (MatchType == FString("Free"))
+		{
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Orange,
+					FString::Printf(TEXT("MatchType: %s"),*MatchType));
+			}
+
+			OnlineSessionInterface->AddOnJoinSessionCompleteDelegate_Handle(JoinSessionCompleteDelegate);
+
+			const ULocalPlayer* LocalPlayer = GetWorld()->GetFirstLocalPlayerFromController();
+			OnlineSessionInterface->JoinSession(*LocalPlayer->GetPreferredUniqueNetId(), NAME_GameSession, Result);
+		}
+	}
+}
+
+void ABrayanLastExamCharacter::OnJoinSessionComplete(FName Session, EOnJoinSessionCompleteResult::Type Result)
+{
+	if (!OnlineSessionInterface.IsValid())
+		return;
+
+	FString Address;
+
+	if (OnlineSessionInterface->GetResolvedConnectString(NAME_GameSession, Address))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Cyan,
+				FString::Printf(TEXT("Connect String %s"),*Address));
+		}
+	}
+	APlayerController* PlayerController = GetGameInstance()->GetFirstLocalPlayerController();
+
+	if (PlayerController)
+	{
+		PlayerController->ClientTravel(Address, TRAVEL_Absolute);
+	}
 }
 
 
@@ -175,7 +351,3 @@ void ABrayanLastExamCharacter::Look(const FInputActionValue& Value)
 		AddControllerPitchInput(LookAxisVector.Y);
 	}
 }
-
-
-
-
